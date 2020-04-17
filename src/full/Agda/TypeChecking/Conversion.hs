@@ -134,7 +134,7 @@ convError err = ifM ((==) Irrelevant <$> asksTC getRelevance) (return ()) $ type
 -- | Type directed equality on values.
 --
 compareTerm :: forall m. MonadConversion m => Comparison -> Type -> Term -> Term -> m ()
-compareTerm cmp a u v = compareAs cmp (AsTermsOf a) u v
+compareTerm cmp a u v = compareAs cmp (AsTermsOf (SingleT a)) u v
 
 -- | Type directed equality on terms or types.
 compareAs :: forall m. MonadConversion m => Comparison -> CompareAs -> Term -> Term -> m ()
@@ -237,26 +237,28 @@ compareAs' cmp tt m n = case tt of
   AsSizes     -> compareSizes cmp m n
   AsTypes     -> compareAtom cmp AsTypes m n
 
-compareTerm' :: forall m. MonadConversion m => Comparison -> Type -> Term -> Term -> m ()
+compareTerm' :: forall m. MonadConversion m => Comparison -> TwinT -> Term -> Term -> m ()
 compareTerm' cmp a m n =
   verboseBracket "tc.conv.term" 20 "compareTerm" $ do
   a' <- reduce a
+  let SingleT a'0 = a'
   (catchConstraint (ValueCmp cmp (AsTermsOf a') m n) :: m () -> m ()) $ do
     reportSDoc "tc.conv.term" 30 $ fsep
       [ "compareTerm", prettyTCM m, prettyTCM cmp, prettyTCM n, ":", prettyTCM a' ]
     propIrr  <- isPropEnabled
     isSize   <- isJust <$> isSizeType a'
-    s        <- reduce $ getSort a'
+    -- What should be the sort of a twin?
+    s        <- reduce $ getSort a'0
     mlvl     <- getBuiltin' builtinLevel
     reportSDoc "tc.conv.level" 60 $ nest 2 $ sep
       [ "a'   =" <+> pretty a'
       , "mlvl =" <+> pretty mlvl
-      , text $ "(Just (unEl a') == mlvl) = " ++ show (Just (unEl a') == mlvl)
+      , text $ "(Just (unEl a') == mlvl) = " ++ show (Just (unEl a'0) == mlvl)
       ]
     case s of
-      Prop{} | propIrr -> compareIrrelevant a' m n
+      Prop{} | propIrr -> compareIrrelevant a'0 m n
       _    | isSize   -> compareSizes cmp m n
-      _               -> case unEl a' of
+      _               -> case unEl a'0 of
         a | Just a == mlvl -> do
           a <- levelView m
           b <- levelView n
@@ -308,8 +310,8 @@ compareTerm' cmp a m n =
                   -- Record constructors are covariant (see test/succeed/CovariantConstructors).
                   compareArgs (repeat $ polFromCmp cmp) [] (telePi_ tel __DUMMY_TYPE__) (Con c ConOSystem []) m' n'
 
-            else (do pathview <- pathView a'
-                     equalPath pathview a' m n)
+            else (do pathview <- pathView a'0
+                     equalPath pathview a'0 m n)
         _ -> compareAtom cmp (AsTermsOf a') m n
   where
     -- equality at function type (accounts for eta)
@@ -369,7 +371,7 @@ compareTerm' cmp a m n =
               let mkOut m = apply out $ map (setHiding Hidden) args ++ [argN m]
               compareTerm cmp ty (mkOut m) (mkOut n)
          Def q [] | Just q == mI -> compareInterval cmp a' m n
-         _ -> compareAtom cmp (AsTermsOf a') m n
+         _ -> compareAtom cmp (AsTermsOf (SingleT a')) m n
 
 -- | @compareTel t1 t2 cmp tel1 tel1@ checks whether pointwise
 --   @tel1 \`cmp\` tel2@ and complains that @t2 \`cmp\` t1@ failed if
@@ -490,7 +492,7 @@ compareAtom cmp t m n =
       (NotBlocked _ (MetaV x xArgs), NotBlocked _ (MetaV y yArgs))
           | x == y , cmpBlocked -> do
               a <- metaType x
-              compareElims [] [] a (MetaV x []) xArgs yArgs
+              compareElims [] [] (SingleT a) (MetaV x []) xArgs yArgs
           | x == y ->
             case intersectVars xArgs yArgs of
               -- all relevant arguments are variables
@@ -549,7 +551,7 @@ compareAtom cmp t m n =
           (Var i es, Var i' es') | i == i' -> do
               a <- typeOfBV i
               -- Variables are invariant in their arguments
-              compareElims [] [] a (var i) es es'
+              compareElims [] [] (SingleT a) (var i) es es'
 
           -- The case of definition application:
           (Def f es, Def f' es') -> do
@@ -572,14 +574,14 @@ compareAtom cmp t m n =
                -- The polarity vector of projection-like functions
                -- does not include the parameters.
                pol <- getPolarity' cmp f
-               compareElims pol [] a (Def f []) es es'
+               compareElims pol [] (SingleT a) (Def f []) es es'
 
           -- Due to eta-expansion, these constructors are fully applied.
           (Con x ci xArgs, Con y _ yArgs)
               | x == y -> do
                   -- Get the type of the constructor instantiated to the datatype parameters.
                   a' <- case t of
-                    AsTermsOf a -> conType x a
+                    AsTermsOf a -> closeTwinT <$> traverse (conType x) (openTwinT a)
                     AsSizes   -> __IMPOSSIBLE__
                     AsTypes   -> __IMPOSSIBLE__
                   forcedArgs <- getForcedArgs $ conName x
@@ -611,9 +613,9 @@ compareAtom cmp t m n =
               -- sense.
               equalType (El Inf $ apply tSub $ a : map (setHiding NotHidden) [bA,phi,u])
                         (El Inf $ apply tSub $ a : map (setHiding NotHidden) [bA',phi',u'])
-              compareAtom cmp (AsTermsOf $ El Inf $ apply tSub $ a : map (setHiding NotHidden) [bA,phi,u])
+              compareAtom cmp (AsTermsOf $ SingleT $ El Inf $ apply tSub $ a : map (setHiding NotHidden) [bA,phi,u])
                               (unArg x) (unArg x')
-              compareElims [] [] (El (tmSort (unArg a)) (unArg bA)) (Def q as) bs bs'
+              compareElims [] [] (SingleT$ El (tmSort (unArg a)) (unArg bA)) (Def q as) bs bs'
               return True
             _  -> return False
         compareUnglueApp q es es' = do
@@ -628,9 +630,9 @@ compareAtom cmp t m n =
               -- sense.
               -- equalType (El (tmSort (unArg lb)) $ apply tGlue $ [la,lb] ++ map (setHiding NotHidden) [bA,phi,bT,e])
               --           (El (tmSort (unArg lb')) $ apply tGlue $ [la',lb'] ++ map (setHiding NotHidden) [bA',phi',bT',e'])
-              compareAtom cmp (AsTermsOf $ El (tmSort (unArg lb)) $ apply tGlue $ [la,lb] ++ map (setHiding NotHidden) [bA,phi,bT,e])
+              compareAtom cmp (AsTermsOf $ SingleT $ El (tmSort (unArg lb)) $ apply tGlue $ [la,lb] ++ map (setHiding NotHidden) [bA,phi,bT,e])
                               (unArg b) (unArg b')
-              compareElims [] [] (El (tmSort (unArg la)) (unArg bA)) (Def q as) bs bs'
+              compareElims [] [] (SingleT $ El (tmSort (unArg la)) (unArg bA)) (Def q as) bs bs'
               return True
             _  -> return False
         compareUnglueUApp :: MonadConversion m => QName -> Elims -> Elims -> m Bool
@@ -648,9 +650,9 @@ compareAtom cmp t m n =
               bA <- runNamesT [] $ do
                 [la,phi,bT,bAS] <- mapM (open . unArg) [la,phi,bT,bAS]
                 (pure tSubOut <#> (pure tLSuc <@> la) <#> (Sort . tmSort <$> la) <#> phi <#> (bT <@> primIZero) <@> bAS)
-              compareAtom cmp (AsTermsOf $ El (tmSort . unArg $ sucla) $ apply tHComp $ [sucla, argH (Sort s), phi] ++ [argH (unArg bT), argH bA])
+              compareAtom cmp (AsTermsOf $ SingleT $ El (tmSort . unArg $ sucla) $ apply tHComp $ [sucla, argH (Sort s), phi] ++ [argH (unArg bT), argH bA])
                               (unArg b) (unArg b')
-              compareElims [] [] (El s bA) (Def q as) bs bs'
+              compareElims [] [] (SingleT $ El s bA) (Def q as) bs bs'
               return True
             _  -> return False
         -- Andreas, 2013-05-15 due to new postponement strategy, type can now be blocked
@@ -823,13 +825,13 @@ antiUnifyElims _ _ _ _ _ = patternViolation -- trigger maybeGiveUp in antiUnify
 
 -- | @compareElims pols a v els1 els2@ performs type-directed equality on eliminator spines.
 --   @t@ is the type of the head @v@.
-compareElims :: forall m. MonadConversion m => [Polarity] -> [IsForced] -> Type -> Term -> [Elim] -> [Elim] -> m ()
+compareElims :: forall m. MonadConversion m => [Polarity] -> [IsForced] -> TwinT -> Term -> [Elim] -> [Elim] -> m ()
 compareElims pols0 fors0 a v els01 els02 =
   verboseBracket "tc.conv.elim" 20 "compareElims" $
   (catchConstraint (ElimCmp pols0 fors0 a v els01 els02) :: m () -> m ()) $ do
   let v1 = applyE v els01
       v2 = applyE v els02
-      failure = typeError $ UnequalTerms CmpEq v1 v2 (AsTermsOf a)
+      failure = typeError $ UnequalTerms CmpEq v1 v2 (AsTermsOf $ a)
         -- Andreas, 2013-03-15 since one of the spines is empty, @a@
         -- is the correct type here.
   unless (null els01) $ do
@@ -842,6 +844,8 @@ compareElims pols0 fors0 a v els01 els02 =
       , "els01 =" <+> prettyTCM els01
       , "els02 =" <+> prettyTCM els02
       ]
+  -- Assume that it's not a twin type
+  let SingleT a0 = a
   case (els01, els02) of
     ([]         , []         ) -> return ()
     ([]         , Proj{}:_   ) -> failure -- not impossible, see issue 821
@@ -861,7 +865,7 @@ compareElims pols0 fors0 a v els01 els02 =
        -- Andrea: copying stuff from the Apply case..
       let (pol, pols) = nextPolarity pols0
       ifBlocked a (\ m t -> patternViolation) $ \ _ a -> do
-          va <- pathView a
+          va <- pathView a0
           reportSDoc "tc.conv.elim.iapply" 60 $ "compareElims IApply" $$ do
             nest 2 $ "va =" <+> text (show (isPathType va))
           case va of
@@ -872,11 +876,11 @@ compareElims pols0 fors0 a v els01 els02 =
               -- TODO: compare (x1,x2) and (y1,y2) ?
               let r = r1 -- TODO Andrea:  do blocking
               codom <- el' (pure . unArg $ l) ((pure . unArg $ bA) <@> pure r)
-              compareElims pols [] codom -- Path non-dependent (codom `lazyAbsApp` unArg arg)
+              compareElims pols [] (SingleT codom) -- Path non-dependent (codom `lazyAbsApp` unArg arg)
                                 (applyE v [e]) els1 els2
             -- We allow for functions (i : I) -> ... to also be heads of a IApply,
             -- because @etaContract@ can produce such terms
-            OType t@(El _ Pi{}) -> compareElims pols0 fors0 t v (Apply (defaultArg r1) : els1) (Apply (defaultArg r2) : els2)
+            OType t@(El _ Pi{}) -> compareElims pols0 fors0 (SingleT t) v (Apply (defaultArg r1) : els1) (Apply (defaultArg r2) : els2)
 
             OType{} -> patternViolation
 
@@ -899,7 +903,7 @@ compareElims pols0 fors0 a v els01 els02 =
           (for, fors) = nextIsForced fors0
       ifBlocked a (\ m t -> patternViolation) $ \ _ a -> do
         reportSLn "tc.conv.elim" 40 $ "type is not blocked"
-        case unEl a of
+        case unEl a0 of
           (Pi (Dom{domInfo = info, unDom = b}) codom) -> do
             reportSLn "tc.conv.elim" 40 $ "type is a function type"
             mlvl <- tryMaybe primLevel
@@ -943,7 +947,7 @@ compareElims pols0 fors0 a v els01 els02 =
                     return arg
                    else return arg1
             -- continue, possibly with blocked instantiation
-            compareElims pols fors (codom `lazyAbsApp` unArg arg) (apply v [arg]) els1 els2
+            compareElims pols fors (SingleT$ codom `lazyAbsApp` unArg arg) (apply v [arg]) els1 els2
             -- any left over constraints of arg are associated to the comparison
             reportSLn "tc.conv.elim" 40 $ "stealing constraints from problem " ++ show pid
             stealConstraints pid
@@ -968,14 +972,14 @@ compareElims pols0 fors0 a v els01 els02 =
     (Proj o f : els1, Proj _ f' : els2)
       | f /= f'   -> typeError . GenericError . show =<< prettyTCM f <+> "/=" <+> prettyTCM f'
       | otherwise -> ifBlocked a (\ m t -> patternViolation) $ \ _ a -> do
-        res <- projectTyped v a o f -- fails only if f is proj.like but parameters cannot be retrieved
+        res <- projectTyped v a0 o f -- fails only if f is proj.like but parameters cannot be retrieved
         case res of
           Just (_, u, t) -> do
             -- Andreas, 2015-07-01:
             -- The arguments following the principal argument of a projection
             -- are invariant.  (At least as long as we have no explicit polarity
             -- annotations.)
-            compareElims [] [] t u els1 els2
+            compareElims [] [] (SingleT t) u els1 els2
           Nothing -> do
             reportSDoc "tc.conv.elims" 30 $ sep
               [ text $ "projection " ++ show f
@@ -1023,7 +1027,7 @@ compareIrrelevant t v0 w0 = do
         -- Andreas, 2016-08-08, issue #2131:
         -- Mining for solutions for irrelevant metas is not definite.
         -- Thus, in case of error, leave meta unsolved.
-        else assignE DirEq x es w (AsTermsOf t) (compareIrrelevant t) `catchError` \ _ -> fallback
+        else assignE DirEq x es w (AsTermsOf (SingleT t)) (compareIrrelevant t) `catchError` \ _ -> fallback
         -- the value of irrelevant or unused meta does not matter
     try v w fallback = fallback
 
@@ -1041,7 +1045,7 @@ polFromCmp CmpEq  = Invariant
 --
 compareArgs :: MonadConversion m => [Polarity] -> [IsForced] -> Type -> Term -> Args -> Args -> m ()
 compareArgs pol for a v args1 args2 =
-  compareElims pol for a v (map Apply args1) (map Apply args2)
+  compareElims pol for (SingleT a) v (map Apply args1) (map Apply args2)
 
 ---------------------------------------------------------------------------
 -- * Types
@@ -1509,7 +1513,7 @@ equalLevel a b = do
       where
         a === b = unlessM typeInType $ do
           lvl <- levelType
-          equalAtom (AsTermsOf lvl) a b
+          equalAtom (AsTermsOf (SingleT lvl)) a b
 
         ok       = return ()
         notok    = unlessM typeInType notOk
@@ -1523,7 +1527,7 @@ equalLevel a b = do
           reportSLn "tc.meta.level" 30 $ "Assigning meta level"
           reportSDoc "tc.meta.level" 50 $ "meta" <+> sep [prettyList $ map pretty as, pretty b]
           lvl <- levelType
-          assignE DirEq x as (levelTm b) (AsTermsOf lvl) (===) -- fallback: check equality as atoms
+          assignE DirEq x as (levelTm b) (AsTermsOf (SingleT lvl)) (===) -- fallback: check equality as atoms
 
         -- NB:: Defined but not used: wrap
         -- Make sure to give a sensible error message
@@ -1932,13 +1936,13 @@ compareInterval cmp i t u = do
       -- also if blocked we won't find the terms conclusively unequal(?) so compareAtom
       -- won't report type errors when we should accept.
       interval <- elInf $ primInterval
-      compareAtom CmpEq (AsTermsOf interval) t u
+      compareAtom CmpEq (AsTermsOf (SingleT interval)) t u
     _ | otherwise -> do
       x <- leqInterval it iu
       y <- leqInterval iu it
       let final = isCanonical it && isCanonical iu
       if x && y then reportSDoc "tc.conv.interval" 15 $ "Ok! }" else
-        if final then typeError $ UnequalTerms cmp t u (AsTermsOf i)
+        if final then typeError $ UnequalTerms cmp t u (AsTermsOf (SingleT i))
                  else do
                    reportSDoc "tc.conv.interval" 15 $ "Giving up! }"
                    patternViolation
@@ -1975,7 +1979,7 @@ leqConj (rs, rst) (qs, qst) = do
       -- 1) in some situations the same constraint would get generated twice.
       -- 2) unless things are completely accepted we are going to
       --    throw patternViolation in compareInterval.
-      let eqT t u = tryConversion (compareAtom CmpEq (AsTermsOf interval) t u)
+      let eqT t u = tryConversion (compareAtom CmpEq (AsTermsOf (SingleT interval)) t u)
       let listSubset ts us =
             and <$> forM ts (\t -> or <$> forM us (\u -> eqT t u)) -- TODO shortcut
       listSubset qst rst

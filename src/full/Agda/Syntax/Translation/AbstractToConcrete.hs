@@ -1666,3 +1666,6 @@ instance ToConcrete InteractionId C.Expr where
 instance ToConcrete NamedMeta C.Expr where
     toConcrete i = do
       return $ C.Underscore noRange (Just $ prettyShow i)
+
+instance ToConcrete a b => ToConcrete (TwinT' a) (TwinT' b) where
+    toConcrete = traverse toConcrete

@@ -318,7 +318,7 @@ useInjectivity dir ty blk neu = locallyTC eInjectivityDepth succ $ do
           fs  <- getForcedArgs f
           pol <- getPolarity' cmp f
           reportSDoc "tc.inj.invert.success" 20 $ hsep ["Successful spine comparison of", prettyTCM f]
-          app (compareElims pol fs fTy (Def f [])) blkArgs neuArgs
+          app (compareElims pol fs (SingleT fTy) (Def f [])) blkArgs neuArgs
 
         -- f us == c vs
         --    Find the clause unique clause `f ps` with head `c` and unify
@@ -394,7 +394,7 @@ invertFunction cmp blk (Inv f blkArgs hdMap) hd fallback err success = do
           -- The clause might not give as many patterns as there
           -- are arguments (point-free style definitions).
           let blkArgs' = take (length margs) blkArgs
-          compareElims pol fs fTy (Def f []) margs blkArgs'
+          compareElims pol fs (SingleT fTy) (Def f []) margs blkArgs'
 
           -- Check that we made progress.
           r <- liftReduce $ unfoldDefinitionStep False (Def f []) f blkArgs

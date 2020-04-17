@@ -163,7 +163,7 @@ checkConfluenceOfRules' isClause rews = inTopContext $ inAbstractMode $ do
           fa   <- defType <$> getConstInfo f
           fpol <- getPolarity' CmpEq f
           onlyReduceTypes $
-            compareElims fpol [] fa (hd []) es1' es2'
+            compareElims fpol [] (SingleT fa) (hd []) es1' es2'
 
           -- Get the rhs of both rewrite rules (after unification). In
           -- case of different arities, add additional arguments from
@@ -239,7 +239,7 @@ checkConfluenceOfRules' isClause rews = inTopContext $ inAbstractMode $ do
           ga   <- defType <$> getConstInfo g
           gpol <- getPolarity' CmpEq g
           onlyReduceTypes $ addContext bvTel $
-            compareElims gpol [] ga (hdg []) es1' es2
+            compareElims gpol [] (SingleT ga) (hdg []) es1' es2
 
           -- Right-hand side of first rewrite rule (after unification)
           let rhs1 = applySubst sub1 $ rewRHS rew1

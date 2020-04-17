@@ -554,7 +554,7 @@ pruneUnsolvedMetas genRecName genRecCon genTel genRecFields interactionPoints is
     doPrune :: MetaId -> MetaVariable -> Maybe Type -> Term -> Term -> TCM ()
     doPrune x mv mt v u =
       case mt of
-        _ | isOpen -> assign DirEq x (getArgs v) u $ maybe AsTypes AsTermsOf mt
+        _ | isOpen -> assign DirEq x (getArgs v) u $ maybe AsTypes (AsTermsOf . SingleT) mt
         Nothing    -> equalSort (unwrapSort v) (unwrapSort u)
         Just t     -> equalTerm t v u
       where

@@ -299,7 +299,7 @@ checkRewriteRule q = do
           a   <- computeElimHeadType f es es'
           pol <- getPolarity' CmpEq f
           ok  <- dontAssignMetas $ tryConversion $
-                   compareElims pol [] a (Def f []) es es'
+                   compareElims pol [] (SingleT a) (Def f []) es es'
           unless ok fail
         _ -> fail
 

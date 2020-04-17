@@ -160,7 +160,7 @@ giveExpr force mii mi e = do
           _ -> do -- updateMeta mi v
             reportSLn "interaction.give" 20 "give: meta unassigned, assigning..."
             args <- getContextArgs
-            nowSolvingConstraints $ assign DirEq mi args v (AsTermsOf t')
+            nowSolvingConstraints $ assign DirEq mi args v (AsTermsOf (SingleT t'))
 
         reportSDoc "interaction.give" 20 $ "give: meta variable updated!"
         unless (force == WithForce) $ redoChecks mii
@@ -386,10 +386,10 @@ reifyElimToExpr e = case e of
     appl s v = A.App defaultAppInfo_ (A.Lit (LitString noRange s)) $ fmap unnamed v
 
 instance Reify Constraint (OutputConstraint Expr Expr) where
-    reify (ValueCmp cmp (AsTermsOf t) u v) = CmpInType cmp <$> reify t <*> reify u <*> reify v
-    reify (ValueCmp cmp AsSizes u v) = CmpInType cmp <$> (reify =<< sizeType) <*> reify u <*> reify v
+    reify (ValueCmp cmp (AsTermsOf t) u v) = CmpInType cmp <$> traverse reify t <*> reify u <*> reify v
+    reify (ValueCmp cmp AsSizes u v) = CmpInType cmp <$> (SingleT <$> (reify =<< sizeType)) <*> reify u <*> reify v
     reify (ValueCmp cmp AsTypes u v) = CmpTypes cmp <$> reify u <*> reify v
-    reify (ValueCmpOnFace cmp p t u v) = CmpInType cmp <$> (reify =<< ty) <*> reify (lam_o u) <*> reify (lam_o v)
+    reify (ValueCmpOnFace cmp p t u v) = CmpInType cmp <$> (SingleT <$> (reify =<< ty)) <*> reify (lam_o u) <*> reify (lam_o v)
       where
         lam_o = I.Lam (setRelevance Irrelevant defaultArgInfo) . NoAbs "_"
         ty = runNamesT [] $ do
@@ -397,8 +397,8 @@ instance Reify Constraint (OutputConstraint Expr Expr) where
           t <- open t
           pPi' "o" p (\ o -> t)
     reify (ElimCmp cmp _ t v es1 es2) =
-      CmpElim cmp <$> reify t <*> mapM reifyElimToExpr es1
-                              <*> mapM reifyElimToExpr es2
+      CmpElim cmp <$> traverse reify t <*> mapM reifyElimToExpr es1
+                                       <*> mapM reifyElimToExpr es2
     reify (LevelCmp cmp t t')    = CmpLevels cmp <$> reify t <*> reify t'
     reify (TelCmp a b cmp t t')  = CmpTeles cmp <$> (ETel <$> reify t) <*> (ETel <$> reify t')
     reify (SortCmp cmp s s')     = CmpSorts cmp <$> reify s <*> reify s'

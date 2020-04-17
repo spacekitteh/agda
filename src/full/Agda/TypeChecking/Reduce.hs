@@ -208,6 +208,12 @@ instance Instantiate Constraint where
   instantiate' (UnquoteTactic m t h g) = UnquoteTactic m <$> instantiate' t <*> instantiate' h <*> instantiate' g
   instantiate' c@CheckMetaInst{}    = return c
 
+instance Instantiate TwinT where
+  instantiate' (SingleT a) = SingleT <$> instantiate' a
+  instantiate' (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    (\a' b' -> TwinT{twinPid,necessary,twinLHS=a',twinRHS=b'}) <$>
+    instantiate' a <*> instantiate' b
+
 instance Instantiate CompareAs where
   instantiate' (AsTermsOf a) = AsTermsOf <$> instantiate' a
   instantiate' AsSizes       = return AsSizes
@@ -247,6 +253,14 @@ instance IsMeta Level where
 instance IsMeta Sort where
   isMeta (MetaS m _) = return $ Just m
   isMeta _           = return Nothing
+
+instance IsMeta TwinT where
+  isMeta (SingleT a) = isMeta a
+  isMeta (TwinT{twinLHS=a,twinRHS=b}) = do
+    lhs <- isMeta a
+    case lhs of
+      Just{}  -> return lhs
+      Nothing -> isMeta b
 
 instance IsMeta CompareAs where
   isMeta (AsTermsOf a) = isMeta a
@@ -790,6 +804,12 @@ instance Reduce Constraint where
   reduce' (UnquoteTactic m t h g) = UnquoteTactic m <$> reduce' t <*> reduce' h <*> reduce' g
   reduce' c@CheckMetaInst{}     = return c
 
+instance Reduce TwinT where
+  reduce' (SingleT a) = SingleT <$> reduce' a
+  reduce' (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    (\a' b' -> TwinT{twinPid,necessary,twinLHS=a',twinRHS=b'}) <$>
+    reduce' a <*> reduce' b
+
 instance Reduce CompareAs where
   reduce' (AsTermsOf a) = AsTermsOf <$> reduce' a
   reduce' AsSizes       = return AsSizes
@@ -940,7 +960,7 @@ instance Simplify Constraint where
     return $ ValueCmp cmp t u v
   simplify' (ValueCmpOnFace cmp p t u v) = do
     ((p,t),u,v) <- simplify' ((p,t),u,v)
-    return $ ValueCmp cmp (AsTermsOf t) u v
+    return $ ValueCmp cmp (AsTermsOf (SingleT t)) u v
   simplify' (ElimCmp cmp fs t v as bs) =
     ElimCmp cmp fs <$> simplify' t <*> simplify' v <*> simplify' as <*> simplify' bs
   simplify' (LevelCmp cmp u v)    = uncurry (LevelCmp cmp) <$> simplify' (u,v)
@@ -956,6 +976,12 @@ instance Simplify Constraint where
   simplify' (HasPTSRule a b)      = uncurry HasPTSRule <$> simplify' (a,b)
   simplify' (UnquoteTactic m t h g) = UnquoteTactic m <$> simplify' t <*> simplify' h <*> simplify' g
   simplify' c@CheckMetaInst{}     = return c
+
+instance Simplify TwinT where
+  simplify' (SingleT a) = SingleT <$> simplify' a
+  simplify' (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    (\a' b' -> TwinT{twinPid,necessary,twinLHS=a',twinRHS=b'}) <$>
+    simplify' a <*> simplify' b
 
 instance Simplify CompareAs where
   simplify' (AsTermsOf a) = AsTermsOf <$> simplify' a
@@ -1141,6 +1167,12 @@ instance Normalise Constraint where
   normalise' (HasPTSRule a b)      = uncurry HasPTSRule <$> normalise' (a,b)
   normalise' (UnquoteTactic m t h g) = UnquoteTactic m <$> normalise' t <*> normalise' h <*> normalise' g
   normalise' c@CheckMetaInst{}     = return c
+
+instance Normalise TwinT where
+  normalise' (SingleT a) = SingleT <$> normalise' a
+  normalise' (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    (\a' b' -> TwinT{twinPid,necessary,twinLHS=a',twinRHS=b'}) <$>
+    normalise' a <*> normalise' b
 
 instance Normalise CompareAs where
   normalise' (AsTermsOf a) = AsTermsOf <$> normalise' a
@@ -1368,6 +1400,12 @@ instance InstantiateFull Constraint where
     HasPTSRule a b      -> uncurry HasPTSRule <$> instantiateFull' (a,b)
     UnquoteTactic m t g h -> UnquoteTactic m <$> instantiateFull' t <*> instantiateFull' g <*> instantiateFull' h
     c@CheckMetaInst{}   -> return c
+
+instance InstantiateFull TwinT where
+  instantiateFull' (SingleT a) = SingleT <$> instantiateFull' a
+  instantiateFull' (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    (\a' b' -> TwinT{twinPid,necessary,twinLHS=a',twinRHS=b'}) <$>
+    instantiateFull' a <*> instantiateFull' b
 
 instance InstantiateFull CompareAs where
   instantiateFull' (AsTermsOf a) = AsTermsOf <$> instantiateFull' a

@@ -54,6 +54,14 @@ instance IsSizeType a => IsSizeType (Type' a) where
 instance IsSizeType Term where
   isSizeType v = isSizeTypeTest <*> pure v
 
+instance IsSizeType TwinT where
+  isSizeType (SingleT a) = isSizeType a
+  isSizeType (TwinT{twinLHS,twinRHS}) = do
+    lhs <- isSizeType twinLHS
+    case lhs of
+      Just{}  -> return lhs
+      Nothing -> isSizeType twinRHS
+
 instance IsSizeType CompareAs where
   isSizeType (AsTermsOf a) = isSizeType a
   isSizeType AsSizes       = return $ Just BoundedNo

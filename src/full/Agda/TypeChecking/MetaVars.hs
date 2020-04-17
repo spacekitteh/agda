@@ -416,7 +416,7 @@ blockTermOnProblem t v pid =
         updateMetaVar m' (\mv -> mv { mvTwin = Just x })
         i   <- fresh
         -- This constraint is woken up when unblocking, so it doesn't need a problem id.
-        cmp <- buildProblemConstraint_ (ValueCmp CmpEq (AsTermsOf t) v (MetaV x es))
+        cmp <- buildProblemConstraint_ (ValueCmp CmpEq (AsTermsOf (SingleT t)) v (MetaV x es))
         reportSDoc "tc.constr.add" 20 $ "adding constraint" <+> prettyTCM cmp
         listenToMeta (CheckConstraint i cmp) x
         return v
@@ -471,7 +471,7 @@ postponeTypeCheckingProblem p unblock = do
   -- non-terminating solutions.
   es  <- map Apply <$> getContextArgs
   (_, v) <- newValueMeta DontRunMetaOccursCheck CmpLeq t
-  cmp <- buildProblemConstraint_ (ValueCmp CmpEq (AsTermsOf t) v (MetaV m es))
+  cmp <- buildProblemConstraint_ (ValueCmp CmpEq (AsTermsOf (SingleT t)) v (MetaV m es))
   reportSDoc "tc.constr.add" 20 $ "adding constraint" <+> prettyTCM cmp
   i   <- liftTCM fresh
   listenToMeta (CheckConstraint i cmp) m
@@ -1199,7 +1199,7 @@ subtypingForSizeLt dir   x mvar t args v cont = do
           -- so we cannot fall back to the original handler.
           let xArgs = MetaV x $ map Apply args
               v'    = Def qSizeLt [Apply $ Arg ai yArgs]
-              c     = dirToCmp (`ValueCmp` (AsTermsOf sizeUniv)) dir xArgs v'
+              c     = dirToCmp (`ValueCmp` (AsTermsOf (SingleT sizeUniv))) dir xArgs v'
           catchConstraint c $ cont v'
         _ -> fallback
 

@@ -1020,10 +1020,52 @@ data ProblemConstraint = PConstr
 instance HasRange ProblemConstraint where
   getRange = getRange . theConstraint
 
+data TwinT'' b a  = SingleT a
+                 | TwinT { twinPid   :: [ProblemId]
+                         , necessary :: b
+                         , twinLHS   :: a
+                         , twinRHS   :: a
+                         }
+           deriving (Data, Show, Functor, Foldable, Traversable)
+
+type TwinT' = TwinT'' Bool
+
+-- We do not derive Traverse because we want to be careful when handling the "necessary" bit
+openTwinT :: TwinT'' Bool a -> TwinT'' () a
+openTwinT (SingleT a) = SingleT a
+openTwinT (TwinT{twinPid,twinLHS,twinRHS}) =
+  TwinT{twinPid,necessary=(),twinLHS,twinRHS}
+
+closeTwinT :: TwinT'' () a -> TwinT'' Bool a
+closeTwinT (SingleT a) = SingleT a
+closeTwinT (TwinT{twinPid,twinLHS,twinRHS}) =
+  TwinT{twinPid,necessary=False,twinLHS,twinRHS}
+
+type TwinT = TwinT' Type
+
+instance Free TwinT where
+
+instance TermLike TwinT where
+  traverseTermM f = \case
+    SingleT a -> SingleT <$> traverseTermM f a
+    TwinT{twinPid,twinLHS=a,twinRHS=b} ->
+      (\a' b' -> TwinT{twinPid,necessary=False,twinLHS=a',twinRHS=b'}) <$>
+        traverseTermM f a <*> traverseTermM f b
+
+instance Pretty a => Pretty (TwinT' a) where
+  pretty (SingleT a) = pretty a
+  pretty (TwinT{twinPid,necessary,twinLHS=a,twinRHS=b}) =
+    pretty a <> "‡"
+             <> "["
+             <> pretty twinPid
+             <> (if necessary then "" else "*")
+             <> "]"
+             <> pretty b
+
 data Constraint
   = ValueCmp Comparison CompareAs Term Term
   | ValueCmpOnFace Comparison Term Type Term Term
-  | ElimCmp [Polarity] [IsForced] Type Term [Elim] [Elim]
+  | ElimCmp [Polarity] [IsForced] TwinT Term [Elim] [Elim]
   | TelCmp Type Type Comparison Telescope Telescope -- ^ the two types are for the error message only
   | SortCmp Comparison Sort Sort
   | LevelCmp Comparison Level Level
@@ -1141,8 +1183,8 @@ dirToCmp cont DirGeq = flip $ cont CmpLeq
 -- | We can either compare two terms at a given type, or compare two
 --   types without knowing (or caring about) their sorts.
 data CompareAs
-  = AsTermsOf Type -- ^ @Type@ should not be @Size@.
-                   --   But currently, we do not rely on this invariant.
+  = AsTermsOf TwinT -- ^ None of the components of @TType@ should be @Size@.
+                    --   But currently, we do not rely on this invariant.
   | AsSizes        -- ^ Replaces @AsTermsOf Size@.
   | AsTypes
   deriving (Data, Show)

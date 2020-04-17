@@ -24,7 +24,7 @@ import Agda.Syntax.Internal (telToList, Dom'(..), Dom)
 import Agda.Syntax.Position (Range, rangeIntervals, Interval'(..), Position'(..))
 import Agda.VersionCommit
 
-import Agda.TypeChecking.Monad (Comparison(..), inTopContext, ProblemId(..), TCM)
+import Agda.TypeChecking.Monad (Comparison(..), inTopContext, ProblemId(..), TCM, TwinT''(..),TwinT')
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
 import Agda.TypeChecking.Pretty (PrettyTCM(..), prettyTCM)
 -- borrowed from EmacsTop, for temporarily serialising stuff
@@ -147,12 +147,12 @@ encodeOC f encodePrettyTCM = \case
   ]
  CmpInType c a i j -> kind "CmpInType"
   [ "comparison"     @= encodeShow c
-  , "type"           #= encodePrettyTCM a
+  , "type"           #= encodeTwinT encodePrettyTCM a
   , "constraintObjs" @= map f [i, j]
   ]
  CmpElim ps a is js -> kind "CmpElim"
   [ "polarities"     @= map encodeShow ps
-  , "type"           #= encodePrettyTCM a
+  , "type"           #= encodeTwinT encodePrettyTCM a
   , "constraintObjs" @= map (map f) [is, js]
   ]
  JustType a -> kind "JustType"
@@ -206,6 +206,14 @@ encodeOC f encodePrettyTCM = \case
   [ "name"           @= encodePretty name
   , "type"           #= encodePrettyTCM a
   ]
+
+-- TODO: Check that it's ok to return single value bare,
+-- and double value as list.
+encodeTwinT :: (b -> TCM Value)
+  -> TwinT' b
+  -> TCM Value
+encodeTwinT f (SingleT a) = f a
+encodeTwinT f (TwinT{twinLHS=a,twinRHS=b}) = toJSONList <$> mapM f [a,b]
 
 encodeNamedPretty :: PrettyTCM a => (Name, a) -> TCM Value
 encodeNamedPretty (name, a) = obj
